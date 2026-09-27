@@ -9,13 +9,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from todo_app.config import DATA_PATH_ENV, DEFAULT_DATA_PATH, Settings, load_settings
+from todo_app.errors import PersistenceReadError, PersistenceWriteError
 from todo_app.main import create_app
 from todo_app.models import Todo
-from todo_app.repository import JsonTodoRepository
+from todo_app.repository import JsonTodoRepository, TodoRepository
 
 FIRST_ID = UUID("11111111-1111-4111-8111-111111111111")
 SECOND_ID = UUID("22222222-2222-4222-8222-222222222222")
 THIRD_ID = UUID("33333333-3333-4333-8333-333333333333")
+UNMATCHED_ID = UUID("44444444-4444-4444-8444-444444444444")
+SECRET_MARKER = "CORRUPT_SECRET_MARKER"
 FIRST_TIME = datetime(2026, 9, 25, 14, 30, tzinfo=UTC)
 LATER_TIME = datetime(2026, 9, 25, 14, 31, tzinfo=UTC)
 LATEST_TIME = datetime(2026, 9, 25, 14, 32, tzinfo=UTC)
@@ -789,3 +792,295 @@ def test_list_strikethrough_follows_complete_and_incomplete(data_path: Path) -> 
     post_action(client, f"/todos/{FIRST_ID}/incomplete")
     assert "<s>Toggle me</s>" not in client.get("/").text
     assert ">Toggle me</a>" in client.get("/").text
+
+
+class BrokenRepository:
+    """Repository double that fails on load or save with a chosen application error."""
+
+    def __init__(
+        self,
+        todos: list[Todo] | None = None,
+        *,
+        load_error: Exception | None = None,
+        save_error: Exception | None = None,
+    ) -> None:
+        self.todos = list(todos or [])
+        self.load_error = load_error
+        self.save_error = save_error
+        self.saves = 0
+
+    def load_all(self) -> list[Todo]:
+        if self.load_error is not None:
+            raise self.load_error
+        return list(self.todos)
+
+    def save_all(self, todos: list[Todo]) -> None:
+        self.saves += 1
+        if self.save_error is not None:
+            raise self.save_error
+        self.todos = list(todos)
+
+
+def client_for(
+    repository: TodoRepository,
+    *,
+    ids: tuple[UUID, ...] = (FIRST_ID,),
+    raise_server_exceptions: bool = True,
+) -> TestClient:
+    app = create_app(
+        repository=repository,
+        clock=FixedSequence(FIRST_TIME),
+        uuid_factory=FixedSequence(*ids),
+    )
+    # Unhandled exceptions reach the outer server-error middleware, which returns the HTML
+    # response and then re-raises. Tests that expect that response must not re-raise it.
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
+
+
+def assert_error_page(response: Any, status_code: int, heading: str) -> None:
+    assert response.status_code == status_code
+    assert response.headers["content-type"].startswith("text/html")
+    assert f"<h1>{heading}</h1>" in response.text
+    assert 'href="/"' in response.text
+    assert '{"detail"' not in response.text
+    assert "Traceback" not in response.text
+    assert "todo_app" not in response.text
+    assert SECRET_MARKER not in response.text
+
+
+# WEB-007: invalid Update
+
+
+def test_invalid_update_returns_422_with_all_errors_and_raw_values(data_path: Path) -> None:
+    original = make_todo(description="Keep", due_date=date(2026, 9, 30), is_completed=True)
+    seed(data_path, original)
+    before = data_path.read_bytes()
+
+    response = post_action(
+        make_client(data_path),
+        f"/todos/{FIRST_ID}/edit",
+        title="   ",
+        description="x" * 2001,
+        dueDate="2026-02-30",
+    )
+
+    assert_error_page(response, 422, "Edit todo")
+    html = response.text
+    assert 'value="   "' in input_tag(html, "title")
+    assert textarea_content(html) == "\n" + "x" * 2001
+    assert 'value="2026-02-30"' in input_tag(html, "dueDate")
+    assert '<small id="title-error" class="field-error">Title is required.</small>' in html
+    assert (
+        '<small id="description-error" class="field-error">'
+        "Description must be 2,000 characters or fewer.</small>"
+    ) in html
+    assert (
+        '<small id="dueDate-error" class="field-error">'
+        "Due date must be a real calendar date.</small>"
+    ) in html
+    assert data_path.read_bytes() == before
+    assert stored(data_path) == [original]
+
+
+@pytest.mark.parametrize("name", ["title", "dueDate"])
+def test_invalid_update_inputs_are_linked_to_their_messages(data_path: Path, name: str) -> None:
+    seed(data_path, make_todo())
+    html = post_action(
+        make_client(data_path), f"/todos/{FIRST_ID}/edit", title="", dueDate="2026/09/24"
+    ).text
+
+    tag = input_tag(html, name)
+    assert 'aria-invalid="true"' in tag
+    assert f'aria-describedby="{name}-error"' in tag
+    assert f'<small id="{name}-error"' in html
+
+
+def test_invalid_update_preserves_markup_as_text(data_path: Path) -> None:
+    seed(data_path, make_todo())
+
+    html = post_action(
+        make_client(data_path),
+        f"/todos/{FIRST_ID}/edit",
+        title=PROBE,
+        description=PROBE,
+        dueDate=f'"><{PROBE}',
+    ).text
+
+    assert f'value="{ESCAPED_PROBE}"' in input_tag(html, "title")
+    assert textarea_content(html) == "\n" + ESCAPED_PROBE
+    assert f'value="&#34;&gt;&lt;{ESCAPED_PROBE}"' in input_tag(html, "dueDate")
+    assert PROBE not in html
+
+
+# WEB-008: missing and malformed IDs, and unknown routes
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/todos/{raw_id}"),
+        ("GET", "/todos/{raw_id}/edit"),
+        ("POST", "/todos/{raw_id}/edit"),
+        ("POST", "/todos/{raw_id}/complete"),
+        ("POST", "/todos/{raw_id}/incomplete"),
+        ("POST", "/todos/{raw_id}/delete"),
+    ],
+)
+@pytest.mark.parametrize(
+    "raw_id",
+    [str(UNMATCHED_ID), "abc", FIRST_ID.hex],
+    ids=["unmatched-uuid", "abc", "no-hyphens"],
+)
+def test_id_routes_return_html_404_without_changing_state(
+    data_path: Path, method: str, path: str, raw_id: str
+) -> None:
+    seed(data_path, make_todo(description="Stay", due_date=date(2026, 9, 30)))
+    before = data_path.read_bytes()
+    response = make_client(data_path).request(
+        method,
+        path.format(raw_id=raw_id),
+        data={"title": " ", "description": "changed", "dueDate": "2026-01-01"},
+        follow_redirects=False,
+    )
+
+    assert_error_page(response, 404, "Not found")
+    assert "That todo or page could not be found." in response.text
+    assert data_path.read_bytes() == before
+
+
+def test_unknown_route_returns_html_404(data_path: Path) -> None:
+    response = make_client(data_path).get("/does-not-exist")
+
+    assert_error_page(response, 404, "Not found")
+    assert "That todo or page could not be found." in response.text
+
+
+def test_malformed_update_target_is_not_found_even_when_the_form_is_invalid(
+    data_path: Path,
+) -> None:
+    seed(data_path, make_todo())
+    before = data_path.read_bytes()
+
+    response = post_action(make_client(data_path), "/todos/abc/edit", title="")
+
+    assert response.status_code == 404
+    assert "Title is required." not in response.text
+    assert data_path.read_bytes() == before
+
+
+# WEB-009 and WEB-010: controlled 500 responses
+
+
+def test_repository_read_failure_returns_safe_html_and_logs_the_cause(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = BrokenRepository(load_error=PersistenceReadError(f"Cannot read {SECRET_MARKER}"))
+    response = client_for(repository).get("/")
+
+    assert_error_page(response, 500, "Something went wrong")
+    assert "Please try again later." in response.text
+    assert "Cannot read" not in response.text
+    logged = capsys.readouterr().err
+    assert "Persistence failure" in logged
+    assert SECRET_MARKER in logged
+    assert "Traceback" in logged
+
+
+def test_repository_write_failure_returns_safe_html_and_does_not_report_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = BrokenRepository(
+        [make_todo()], save_error=PersistenceWriteError(f"disk full {SECRET_MARKER}")
+    )
+    client = client_for(repository, ids=(SECOND_ID,))
+
+    created = create(client, title="New")
+    updated = post_action(client, f"/todos/{FIRST_ID}/edit", title="Changed")
+    completed = post_action(client, f"/todos/{FIRST_ID}/complete")
+    deleted = post_action(client, f"/todos/{FIRST_ID}/delete")
+
+    for response in (created, updated, completed, deleted):
+        assert_error_page(response, 500, "Something went wrong")
+        assert SECRET_MARKER not in response.text
+    assert repository.todos == [make_todo()]
+    assert repository.saves == 4
+    assert SECRET_MARKER in capsys.readouterr().err
+
+
+def test_unexpected_exception_returns_the_same_safe_html_500(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = BrokenRepository(load_error=RuntimeError(f"boom {SECRET_MARKER}"))
+    response = client_for(repository, raise_server_exceptions=False).get(f"/todos/{FIRST_ID}")
+
+    assert_error_page(response, 500, "Something went wrong")
+    assert "Please try again later." in response.text
+    assert "RuntimeError" not in response.text
+    assert "boom" not in response.text
+    logged = capsys.readouterr().err
+    assert "Unexpected failure" in logged
+    assert SECRET_MARKER in logged
+
+
+def test_debug_and_generated_documentation_stay_disabled(data_path: Path) -> None:
+    app = create_app(Settings(data_path=data_path))
+    client = TestClient(app)
+
+    assert app.debug is False
+    assert app.openapi_url is None
+    for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+        response = client.get(path)
+        assert_error_page(response, 404, "Not found")
+
+
+# WEB-015: a corrupt file blocks every read and mutation
+
+
+def test_corrupt_file_returns_500_and_blocks_mutations_without_changing_bytes(
+    data_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    data_path.parent.mkdir(parents=True)
+    original = f"not-json {SECRET_MARKER}".encode()
+    data_path.write_bytes(original)
+    client = make_client(data_path)
+    responses = [
+        client.get("/"),
+        create(client, title="New"),
+        post_action(client, f"/todos/{FIRST_ID}/edit", title="Changed"),
+        post_action(client, f"/todos/{FIRST_ID}/complete"),
+        post_action(client, f"/todos/{FIRST_ID}/incomplete"),
+        post_action(client, f"/todos/{FIRST_ID}/delete"),
+    ]
+
+    for response in responses:
+        assert_error_page(response, 500, "Something went wrong")
+        assert str(data_path) not in response.text
+        assert data_path.read_bytes() == original
+    assert str(data_path) in capsys.readouterr().err
+
+
+# WEB-017: unsupported methods
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "allowed"),
+    [
+        ("POST", "/", "GET"),
+        ("PUT", "/todos/new", "GET"),
+        ("GET", f"/todos/{FIRST_ID}/delete", "POST"),
+        ("DELETE", f"/todos/{FIRST_ID}/edit", "GET"),
+    ],
+)
+def test_unsupported_method_returns_html_405_with_allow_header(
+    data_path: Path, method: str, path: str, allowed: str
+) -> None:
+    seed(data_path, make_todo(description="Stay"))
+    before = data_path.read_bytes()
+
+    response = make_client(data_path).request(method, path, follow_redirects=False)
+
+    assert_error_page(response, 405, "Method not allowed")
+    assert "That action is not supported for this page." in response.text
+    assert allowed in response.headers["allow"]
+    assert data_path.read_bytes() == before
