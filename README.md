@@ -20,6 +20,8 @@ py -3.12 -m venv .venv
 
 On macOS or Linux, use `python3.12` and `.venv/bin/python` in place of the Windows commands above.
 
+If `venv` cannot run `ensurepip` on Windows, create the environment with `py -3.12 -m venv --without-pip .venv`, then run `py -3.12 -m pip --python .venv install -e ".[dev]"` before the commands above.
+
 The `[dev]` extra adds pytest, coverage, Ruff, and mypy. It is not installed in the Docker image.
 
 ## Run locally
@@ -56,7 +58,7 @@ docker run --rm -p 8000:8000 -v todo-data:/data todo-app
 
 `/data` is the persistent-volume location. Attach the same named volume to keep todos across container recreation.
 
-Unmounted container data is disposable. A todo saved without a volume mounted at `/data` disappears when that container is removed.
+Unmounted container data is disposable. A todo saved without a volume mounted at `/data` disappears when that container is removed. Do not attach more than one running application process to the same data file.
 
 ### Volume persistence check
 
@@ -79,10 +81,11 @@ If the primary file is missing, the list is empty. If it exists but is empty, wh
 To recover:
 
 1. Stop the application.
-2. Repair or replace the primary JSON file with a valid array, or delete the file to start from an empty list.
-3. Start the application again.
+2. Copy the primary file's original bytes somewhere else before changing them.
+3. Repair or replace that file with a valid array. Write `[]` only when you intend to discard the collection. Deleting the file also starts from an empty list.
+4. Start the application again.
 
-Do not try to recover by repeating a create or update while the file is still invalid. Those requests fail before writing.
+For a container, change the file on the attached `/data` volume, not the filesystem of a container that was started without one. Do not try to recover by repeating a create or update while the file is still invalid. Those requests fail before writing.
 
 ## Design
 
