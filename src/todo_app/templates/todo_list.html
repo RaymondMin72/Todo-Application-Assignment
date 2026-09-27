@@ -3,7 +3,12 @@
 {% block content %}
 <h1>Todos</h1>
 {% if todos %}
-<table>
+<table class="todo-list">
+  <colgroup>
+    <col class="todo-title">
+    <col class="todo-due">
+    <col class="todo-status">
+  </colgroup>
   <thead>
     <tr>
       <th scope="col">Title</th>

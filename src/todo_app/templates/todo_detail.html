@@ -2,12 +2,10 @@
 {% block title %}{{ todo.title }}{% endblock %}
 {% block content %}
 <article>
-  <h1>{{ todo.title }}</h1>
+  <h1>{% if todo.is_completed %}<s>{{ todo.title }}</s>{% else %}{{ todo.title }}{% endif %}</h1>
   <dl class="todo-fields">
     <dt>ID</dt>
     <dd><code>{{ todo.id }}</code></dd>
-    <dt>Title</dt>
-    <dd>{{ todo.title }}</dd>
     <dt>Description</dt>
     {% if todo.description is not none %}
     <dd class="todo-description">{{ todo.description }}</dd>
@@ -22,18 +20,20 @@
     <dd><time datetime="{{ todo.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ todo.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time></dd>
   </dl>
 </article>
-<p><a href="/todos/{{ todo.id }}/edit">Update</a></p>
-{% if todo.is_completed %}
-<form method="post" action="/todos/{{ todo.id }}/incomplete">
-  <button type="submit">Mark as not completed</button>
-</form>
-{% else %}
-<form method="post" action="/todos/{{ todo.id }}/complete">
-  <button type="submit">Mark as completed</button>
-</form>
-{% endif %}
-<form method="post" action="/todos/{{ todo.id }}/delete">
-  <button type="submit">Delete</button>
-</form>
+<div class="detail-actions">
+  <a role="button" href="/todos/{{ todo.id }}/edit">Update</a>
+  {% if todo.is_completed %}
+  <form method="post" action="/todos/{{ todo.id }}/incomplete">
+    <button type="submit">Mark as not completed</button>
+  </form>
+  {% else %}
+  <form method="post" action="/todos/{{ todo.id }}/complete">
+    <button type="submit">Mark as completed</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/todos/{{ todo.id }}/delete">
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</div>
 <p><a href="/">Back to all todos</a></p>
 {% endblock %}

@@ -199,7 +199,7 @@ def test_every_page_is_english_with_list_navigation_local_styles_and_no_scripts(
     assert '<html lang="en">' in html
     assert '<a href="/"><strong>All todos</strong></a>' in html
     stylesheets = re.findall(r'<link rel="stylesheet" href="([^"]+)">', html)
-    assert stylesheets == ["/static/css/pico.min.css", "/static/css/app.css"]
+    assert stylesheets == ["/static/css/pico.min.css", "/static/css/app.css?v=4"]
     assert "<script" not in html
 
 
@@ -340,14 +340,13 @@ def test_detail_shows_all_six_fields(data_path: Path) -> None:
 
     assert re.findall(r"<dt>(.*?)</dt>", html) == [
         "ID",
-        "Title",
         "Description",
         "Due date",
         "Status",
         "Created",
     ]
+    assert "<h1><s>Submit assignment</s></h1>" in html
     assert f"<code>{FIRST_ID}</code>" in html
-    assert "<dd>Submit assignment</dd>" in html
     assert '<dd class="todo-description">Review the implementation.</dd>' in html
     assert "<dd>2026-09-30</dd>" in html
     assert "<dd>Completed</dd>" in html
@@ -787,11 +786,14 @@ def test_list_strikethrough_follows_complete_and_incomplete(data_path: Path) -> 
 
     post_action(client, f"/todos/{FIRST_ID}/complete")
     assert "<s>Toggle me</s>" in client.get("/").text
-    assert "Mark as not completed" in client.get(f"/todos/{FIRST_ID}").text
+    detail = client.get(f"/todos/{FIRST_ID}").text
+    assert "<h1><s>Toggle me</s></h1>" in detail
+    assert "Mark as not completed" in detail
 
     post_action(client, f"/todos/{FIRST_ID}/incomplete")
     assert "<s>Toggle me</s>" not in client.get("/").text
     assert ">Toggle me</a>" in client.get("/").text
+    assert "<h1>Toggle me</h1>" in client.get(f"/todos/{FIRST_ID}").text
 
 
 class BrokenRepository:

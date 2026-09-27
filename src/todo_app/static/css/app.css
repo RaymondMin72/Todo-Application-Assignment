@@ -6,3 +6,47 @@
 .field-error {
   color: var(--pico-del-color);
 }
+
+.todo-list {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.todo-list .todo-title {
+  width: 50%;
+}
+
+.todo-list .todo-due,
+.todo-list .todo-status {
+  width: 25%;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.detail-actions form {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+}
+
+.detail-actions button[type="submit"],
+.detail-actions a[role="button"] {
+  width: auto;
+  margin-bottom: 0;
+}
+
+.detail-actions button.danger,
+.detail-actions button.danger:is(:hover, :active, :focus) {
+  --pico-background-color: var(--pico-del-color);
+  --pico-border-color: var(--pico-del-color);
+  --pico-color: var(--pico-primary-inverse);
+  background-color: var(--pico-del-color);
+  border-color: var(--pico-del-color);
+  color: var(--pico-primary-inverse);
+  box-shadow: none;
+}
