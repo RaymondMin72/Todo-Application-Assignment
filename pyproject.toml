@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "todo-app"
+version = "0.1.0"
+description = "Server-rendered to-do list application built with FastAPI."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.141.1",
+    "jinja2==3.1.6",
+    "pydantic==2.13.5",
+    "python-multipart==0.0.32",
+    "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx==0.28.1",
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+todo_app = ["templates/*.html", "static/css/*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+# Code snippets in the Markdown specifications are illustrative, not source code.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --strict-markers --cov=todo_app --cov-branch --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["todo_app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
