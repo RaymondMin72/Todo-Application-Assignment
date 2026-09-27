@@ -629,6 +629,18 @@ def test_zero_offset_created_at_is_stored_with_z(
     assert '"createdAt": "2026-09-25T14:30:00Z"' in data_path.read_text(encoding="utf-8")
 
 
+def test_early_year_timestamp_is_stored_with_four_digits(
+    repository: JsonTodoRepository, data_path: Path
+) -> None:
+    early = FIRST_TODO.model_copy(update={"created_at": datetime(1, 1, 1, tzinfo=UTC)})
+
+    repository.save_all([early])
+
+    stored = json.loads(data_path.read_text(encoding="utf-8"))
+    assert stored[0]["createdAt"] == "0001-01-01T00:00:00Z"
+    assert repository.load_all() == [early]
+
+
 # REP-010: the next collection is validated before writing
 
 
