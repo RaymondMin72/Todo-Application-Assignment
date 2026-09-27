@@ -36,7 +36,21 @@ Todos are stored in `./data/todos.json` unless you set `TODO_DATA_PATH`. A relat
 
 ## Tests and quality checks
 
-From the repository root, with the virtual environment active:
+From the repository root, activate the virtual environment first.
+
+Windows (PowerShell):
+
+```text
+.venv\Scripts\Activate.ps1
+```
+
+macOS or Linux:
+
+```text
+source .venv/bin/activate
+```
+
+The prompt includes `(.venv)` after activation. Then run:
 
 ```text
 python -m pytest
