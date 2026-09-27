@@ -1,24 +1,32 @@
 FROM python:3.12-slim
 
-# The application allows one writer. A single Uvicorn worker matches that limit.
-ENV TODO_DATA_PATH=/data/todos.json \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TODO_DATA_PATH=/data/todos.json
 
 WORKDIR /app
 
-RUN useradd --create-home --uid 1000 appuser \
+# Stable runtime identity. Only /data is writable; the installed app stays root-owned.
+RUN useradd \
+        --system \
+        --uid 10001 \
+        --user-group \
+        --no-create-home \
+        --no-log-init \
+        --home-dir /nonexistent \
+        todo \
     && mkdir /data \
-    && chown appuser:appuser /data
+    && chown todo:todo /data
 
+# Both inputs must be present before install. setuptools snapshots src into site-packages.
 COPY pyproject.toml ./
-COPY src ./src
+COPY src/ ./src/
 
-# Install the same pinned runtime dependencies declared in pyproject.toml.
-RUN pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir .
 
-USER appuser
+USER todo:todo
 
 EXPOSE 8000
 
+# One worker matches the in-process service lock.
 CMD ["uvicorn", "todo_app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

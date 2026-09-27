@@ -47,7 +47,7 @@ mypy src/todo_app
 
 ## Docker
 
-The image uses Python 3.12, installs the pinned runtime dependencies, listens on `0.0.0.0:8000`, and starts one Uvicorn process with one worker. It runs as the non-root user `appuser`, which can write to `/data`. The container data file is `/data/todos.json`.
+The image uses Python 3.12, installs the pinned runtime dependencies, listens on `0.0.0.0:8000`, and starts one Uvicorn process with one worker. It runs as the non-root user `todo`, which can write to `/data`. The container data file is `/data/todos.json`.
 
 ```text
 docker build -t todo-app .

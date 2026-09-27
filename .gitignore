@@ -21,7 +21,7 @@ htmlcov/
 coverage.xml
 
 # Runtime data and temporary files
-data/
+/data/
 *.tmp
 
 # Environment files and secrets
