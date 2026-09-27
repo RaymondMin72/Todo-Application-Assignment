@@ -1,6 +1,6 @@
 # Todo application
 
-A single-user, server-rendered to-do list. The browser talks to a FastAPI application, which keeps every todo in one JSON file. Pages work without JavaScript.
+A small, server-rendered FastAPI app for creating, listing, viewing, updating, completing, and deleting Todos. It needs no JavaScript or external database.
 
 ## Requirements
 
@@ -60,43 +60,22 @@ docker run --rm -p 8000:8000 -v todo-data:/data todo-app
 
 Unmounted container data is disposable. A todo saved without a volume mounted at `/data` disappears when that container is removed. Do not attach more than one running application process to the same data file.
 
-### Volume persistence check
-
-Use a disposable volume name:
-
-1. `docker build -t todo-app .`
-2. `docker run --name todo-smoke -p 8000:8000 -v todo-data:/data todo-app`
-3. Open http://127.0.0.1:8000/ and create a todo.
-4. `docker rm -f todo-smoke`
-5. `docker run --name todo-smoke -p 8000:8000 -v todo-data:/data todo-app`
-6. Confirm the todo is still listed.
-7. `docker rm -f todo-smoke` and, when you no longer need the data, `docker volume rm todo-data`.
-
 ## Storage and recovery
 
-The JSON file is a single array. Each record has exactly `id`, `title`, `description`, `dueDate`, `isCompleted`, and `createdAt`. Optional description and due date are JSON `null`. Writes go to a temporary file in the same directory and replace the primary file only after the new contents are flushed. A failed write leaves the previous file in place.
-
-If the primary file is missing, the list is empty. If it exists but is empty, whitespace-only, or otherwise invalid, the application does not repair it, does not load part of it, and does not save over it. Requests then show a generic error page, and the details are written to the server log.
-
-To recover:
-
-1. Stop the application.
-2. Copy the primary file's original bytes somewhere else before changing them.
-3. Repair or replace that file with a valid array. Write `[]` only when you intend to discard the collection. Deleting the file also starts from an empty list.
-4. Start the application again.
-
-For a container, change the file on the attached `/data` volume, not the filesystem of a container that was started without one. Do not try to recover by repeating a create or update while the file is still invalid. Those requests fail before writing.
+The data file is one JSON array. Each record has exactly `id`, `title`, `description`, `dueDate`, `isCompleted`, and `createdAt`; optional description and due date are `null`. A missing file is an empty list. An existing file that is empty, whitespace-only, or invalid is left unchanged: the app shows an error and refuses to write over it. Stop the app, keep a copy of the original bytes, replace the file with a valid array (or delete it to start empty), then start again.
 
 ## Design
 
-The application has three layers. Presentation owns HTTP, forms, Jinja2 templates, and Pico.css. The service owns validation, ordering, and the create, update, complete, incomplete, and delete operations. The repository is the only code that reads and writes JSON. The service holds one in-process lock around each read and each complete read-modify-write. Time and UUID generation can be replaced in tests.
+The application has three layers. **Presentation** owns HTTP, forms, Jinja2 templates, and Pico.css. **Service** owns validation, ordering, and the create, update, complete, incomplete, and delete operations. **Repository** is the only code that reads and writes JSON, writing through a temporary file in the same directory and replacing the primary file only after the new contents are flushed. The service holds one in-process lock around each read and each complete read-modify-write. Time and UUID generation can be replaced in tests.
 
-The list is ordered by creation time, newest first, with the canonical ID as a tie-breaker. Completed titles are struck through, and completion is also written as text. Due dates are shown as `YYYY-MM-DD` or `No due date`, with no overdue styling.
+The list is ordered by creation time, newest first, with the canonical ID as a tie-breaker. Completed titles are struck through, and completion is also written as text. Due dates are shown as `YYYY-MM-DD` or `No due date`, with no overdue styling. The form takes a required title, an optional description, and an optional `YYYY-MM-DD` due date. A new item starts incomplete, and the app assigns its id and creation time.
 
-Automated tests cover the domain rules, the service against an in-memory repository, JSON loading and atomic writes against temporary directories, and the HTML workflows through FastAPI's `TestClient`. Browser end-to-end tests and automated Docker tests are not part of the suite. The container check above is manual.
+Automated tests cover the domain rules, the service against an in-memory repository, JSON loading and atomic writes against temporary directories, and the HTML workflows through FastAPI's `TestClient`. Browser end-to-end tests and automated Docker tests are not part of the suite.
 
 ## Assumptions and limitations
 
-The application serves one person on a trusted machine. It has no accounts, authentication, or CSRF protection. One process should own a data file; multiple writers are not supported, which is why the container uses one worker.
+The application serves one person on a trusted machine. It has no accounts, authentication, or CSRF protection. One process should own a data file; multiple writers are not supported, which is why the container uses one worker. Full-file reads and writes are enough for a few hundred todos. Any invalid record blocks the whole file until it is repaired by hand.
 
-Full-file reads and writes are enough for a few hundred todos. Any invalid record blocks the whole file until it is repaired by hand. There is no backup, undo, filtering, sorting control, or REST API. Update replaces the title, description, and due date together. Complete and incomplete only change the completion flag and can be repeated safely. Delete is permanent and has no confirmation step.
+Update replaces the title, description, and due date together. Complete and incomplete only change the completion flag and can be repeated safely. Delete is permanent and has no confirmation step. There is no backup or undo.
+
+There is no REST API. Of the optional enhancements, input validation and Docker are included. Filtering and user-controlled sorting were left out for time.
