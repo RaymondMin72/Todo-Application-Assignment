@@ -22,5 +22,18 @@
     <dd><time datetime="{{ todo.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ todo.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time></dd>
   </dl>
 </article>
+<p><a href="/todos/{{ todo.id }}/edit">Update</a></p>
+{% if todo.is_completed %}
+<form method="post" action="/todos/{{ todo.id }}/incomplete">
+  <button type="submit">Mark as not completed</button>
+</form>
+{% else %}
+<form method="post" action="/todos/{{ todo.id }}/complete">
+  <button type="submit">Mark as completed</button>
+</form>
+{% endif %}
+<form method="post" action="/todos/{{ todo.id }}/delete">
+  <button type="submit">Delete</button>
+</form>
 <p><a href="/">Back to all todos</a></p>
 {% endblock %}

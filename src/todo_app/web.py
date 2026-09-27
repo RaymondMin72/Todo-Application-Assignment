@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from todo_app.errors import InputValidationError
+from todo_app.models import Todo
 from todo_app.service import TodoService
 
 # The service reports errors by Python field name; the form uses the documented field names.
@@ -22,8 +23,12 @@ def create_router(service: TodoService, templates: Jinja2Templates) -> APIRouter
     """
     router = APIRouter()
 
-    def render_create_form(
+    def render_form(
         request: Request,
+        *,
+        heading: str,
+        action: str,
+        submit_label: str,
         form: dict[str, str],
         errors: dict[str, list[str]],
         status_code: int,
@@ -32,9 +37,9 @@ def create_router(service: TodoService, templates: Jinja2Templates) -> APIRouter
             request,
             "todo_form.html",
             {
-                "heading": "New todo",
-                "action": "/todos",
-                "submit_label": "Create todo",
+                "heading": heading,
+                "action": action,
+                "submit_label": submit_label,
                 "form": form,
                 "errors": errors,
             },
@@ -49,7 +54,15 @@ def create_router(service: TodoService, templates: Jinja2Templates) -> APIRouter
 
     @router.get("/todos/new")
     def new_todo(request: Request) -> Response:
-        return render_create_form(request, _EMPTY_FORM, {}, 200)
+        return render_form(
+            request,
+            heading="New todo",
+            action="/todos",
+            submit_label="Create todo",
+            form=_EMPTY_FORM,
+            errors={},
+            status_code=200,
+        )
 
     @router.post("/todos")
     def create_todo(
@@ -64,7 +77,15 @@ def create_router(service: TodoService, templates: Jinja2Templates) -> APIRouter
         except InputValidationError as exc:
             # Redisplay the raw submitted text, not the normalized values.
             raw_form = {"title": title, "description": description, "dueDate": due_date}
-            return render_create_form(request, raw_form, _form_errors(exc), 422)
+            return render_form(
+                request,
+                heading="New todo",
+                action="/todos",
+                submit_label="Create todo",
+                form=raw_form,
+                errors=_form_errors(exc),
+                status_code=422,
+            )
         return RedirectResponse("/", status_code=303)
 
     @router.get("/todos/{todo_id}")
@@ -73,8 +94,58 @@ def create_router(service: TodoService, templates: Jinja2Templates) -> APIRouter
             request, "todo_detail.html", {"todo": service.get_todo(todo_id)}
         )
 
+    @router.get("/todos/{todo_id}/edit")
+    def edit_todo(request: Request, todo_id: str) -> Response:
+        todo = service.get_todo(todo_id)
+        return render_form(
+            request,
+            heading="Edit todo",
+            action=f"/todos/{todo.id}/edit",
+            submit_label="Save changes",
+            form=_form_from_todo(todo),
+            errors={},
+            status_code=200,
+        )
+
+    @router.post("/todos/{todo_id}/edit")
+    def update_todo(
+        todo_id: str,
+        title: Annotated[str, Form()] = "",
+        description: Annotated[str, Form()] = "",
+        due_date: Annotated[str, Form(alias="dueDate")] = "",
+    ) -> Response:
+        # Declaring only the editable fields drops any submitted system-managed field.
+        updated = service.update_todo(
+            todo_id, {"title": title, "description": description, "due_date": due_date}
+        )
+        return RedirectResponse(f"/todos/{updated.id}", status_code=303)
+
+    @router.post("/todos/{todo_id}/complete")
+    def complete_todo(todo_id: str) -> Response:
+        updated = service.set_completed(todo_id, True)
+        return RedirectResponse(f"/todos/{updated.id}", status_code=303)
+
+    @router.post("/todos/{todo_id}/incomplete")
+    def incomplete_todo(todo_id: str) -> Response:
+        updated = service.set_completed(todo_id, False)
+        return RedirectResponse(f"/todos/{updated.id}", status_code=303)
+
+    @router.post("/todos/{todo_id}/delete")
+    def delete_todo(todo_id: str) -> Response:
+        service.delete_todo(todo_id)
+        return RedirectResponse("/", status_code=303)
+
     return router
 
 
 def _form_errors(exc: InputValidationError) -> dict[str, list[str]]:
     return {_FORM_FIELD_NAMES[field]: messages for field, messages in exc.errors.items()}
+
+
+def _form_from_todo(todo: Todo) -> dict[str, str]:
+    # Absent optional values are empty controls, so submitting them unchanged clears nothing new.
+    return {
+        "title": todo.title,
+        "description": "" if todo.description is None else todo.description,
+        "dueDate": "" if todo.due_date is None else todo.due_date.isoformat(),
+    }

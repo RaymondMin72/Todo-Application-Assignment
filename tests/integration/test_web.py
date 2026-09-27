@@ -183,7 +183,9 @@ def test_empty_list_offers_a_path_to_create(data_path: Path) -> None:
     assert not data_path.exists()
 
 
-@pytest.mark.parametrize("path", ["/", "/todos/new", f"/todos/{FIRST_ID}"])
+@pytest.mark.parametrize(
+    "path", ["/", "/todos/new", f"/todos/{FIRST_ID}", f"/todos/{FIRST_ID}/edit"]
+)
 def test_every_page_is_english_with_list_navigation_local_styles_and_no_scripts(
     data_path: Path, path: str
 ) -> None:
@@ -505,3 +507,285 @@ def test_created_todos_remain_visible_to_a_new_application_instance(data_path: P
     detail = second_run.get(f"/todos/{FIRST_ID}").text
     assert '<dd class="todo-description">Kept</dd>' in detail
     assert '<time datetime="2026-09-25T14:30:00Z">' in detail
+
+
+def post_action(client: TestClient, path: str, **fields: str) -> Any:
+    return client.post(path, data=fields or None, follow_redirects=False)
+
+
+# WEB-002 and WEB-003: the complete HTML lifecycle and its redirects
+
+
+def test_create_list_view_update_status_and_delete_lifecycle(data_path: Path) -> None:
+    client = make_client(data_path)
+    other = make_todo(SECOND_ID, title="Leave this one")
+    created = create(client, title="Buy milk", description="Note", dueDate="2026-09-30")
+    seed_after_create = stored(data_path)
+    JsonTodoRepository(data_path).save_all([*seed_after_create, other])
+
+    assert created.status_code == 303
+    assert created.headers["location"] == "/"
+    assert f'href="/todos/{FIRST_ID}">Buy milk</a>' in client.get("/").text
+
+    detail = client.get(f"/todos/{FIRST_ID}")
+    assert detail.status_code == 200
+    assert "Note" in detail.text
+
+    updated = post_action(
+        client,
+        f"/todos/{FIRST_ID}/edit",
+        title="Bought milk",
+        description="Updated note",
+        dueDate="2026-10-01",
+    )
+    completed = post_action(client, f"/todos/{FIRST_ID}/complete")
+    repeated = post_action(client, f"/todos/{FIRST_ID}/complete")
+    reopened = post_action(client, f"/todos/{FIRST_ID}/incomplete")
+    deleted = post_action(client, f"/todos/{FIRST_ID}/delete")
+
+    assert updated.status_code == 303
+    assert updated.headers["location"] == f"/todos/{FIRST_ID}"
+    assert completed.status_code == 303
+    assert completed.headers["location"] == f"/todos/{FIRST_ID}"
+    assert repeated.status_code == 303
+    assert repeated.headers["location"] == f"/todos/{FIRST_ID}"
+    assert reopened.status_code == 303
+    assert reopened.headers["location"] == f"/todos/{FIRST_ID}"
+    assert deleted.status_code == 303
+    assert deleted.headers["location"] == "/"
+    assert stored(data_path) == [other]
+    restarted = make_client(data_path, times=(LATEST_TIME,), ids=(THIRD_ID,))
+    assert "Bought milk" not in restarted.get("/").text
+    assert "Leave this one" in restarted.get("/").text
+
+
+def test_update_and_status_redirect_to_detail_and_delete_redirects_to_list(
+    data_path: Path,
+) -> None:
+    seed(data_path, make_todo(description="Keep", due_date=date(2026, 9, 30)))
+    client = make_client(data_path)
+
+    responses = [
+        post_action(client, f"/todos/{FIRST_ID}/edit", title="Renamed"),
+        post_action(client, f"/todos/{FIRST_ID}/complete"),
+        post_action(client, f"/todos/{FIRST_ID}/incomplete"),
+        post_action(client, f"/todos/{FIRST_ID}/delete"),
+    ]
+
+    assert [response.status_code for response in responses] == [303, 303, 303, 303]
+    assert [response.headers["location"] for response in responses] == [
+        f"/todos/{FIRST_ID}",
+        f"/todos/{FIRST_ID}",
+        f"/todos/{FIRST_ID}",
+        "/",
+    ]
+
+
+# WEB-006: detail actions and the pre-filled Update form
+
+
+@pytest.mark.parametrize("completed", [False, True], ids=["incomplete", "completed"])
+def test_detail_offers_update_delete_and_only_the_applicable_status(
+    data_path: Path, completed: bool
+) -> None:
+    seed(data_path, make_todo(is_completed=completed))
+
+    html = make_client(data_path).get(f"/todos/{FIRST_ID}").text
+
+    assert f'href="/todos/{FIRST_ID}/edit"' in html
+    assert f'action="/todos/{FIRST_ID}/delete"' in html
+    assert 'method="post"' in html
+    if completed:
+        assert f'action="/todos/{FIRST_ID}/incomplete"' in html
+        assert f'action="/todos/{FIRST_ID}/complete"' not in html
+        assert "Mark as not completed" in html
+    else:
+        assert f'action="/todos/{FIRST_ID}/complete"' in html
+        assert f'action="/todos/{FIRST_ID}/incomplete"' not in html
+        assert "Mark as completed" in html
+
+
+def test_update_form_is_prefilled_and_every_control_has_a_label(data_path: Path) -> None:
+    seed(
+        data_path,
+        make_todo(title="Submit assignment", description="Review it", due_date=date(2026, 9, 30)),
+    )
+
+    html = make_client(data_path).get(f"/todos/{FIRST_ID}/edit").text
+
+    assert f'<form method="post" action="/todos/{FIRST_ID}/edit">' in html
+    assert 'value="Submit assignment"' in input_tag(html, "title")
+    assert textarea_content(html) == "\nReview it"
+    assert 'value="2026-09-30"' in input_tag(html, "dueDate")
+    for name in ("title", "description", "dueDate"):
+        assert f'<label for="{name}">' in html
+        assert f'id="{name}" name="{name}"' in html
+
+
+def test_update_form_shows_empty_controls_for_absent_optional_values(data_path: Path) -> None:
+    seed(data_path, make_todo(description=None, due_date=None))
+
+    html = make_client(data_path).get(f"/todos/{FIRST_ID}/edit").text
+
+    assert textarea_content(html) == "\n"
+    assert 'value=""' in input_tag(html, "dueDate")
+
+
+def test_blank_update_removes_optional_fields_without_changing_protected_ones(
+    data_path: Path,
+) -> None:
+    original = make_todo(description="Remove me", due_date=date(2026, 9, 30), is_completed=True)
+    seed(data_path, original)
+
+    response = post_action(
+        make_client(data_path),
+        f"/todos/{FIRST_ID}/edit",
+        title="  Kept title  ",
+        description="  \r\n ",
+        dueDate="   ",
+    )
+
+    assert response.status_code == 303
+    assert stored(data_path) == [
+        original.model_copy(update={"title": "Kept title", "description": None, "due_date": None})
+    ]
+
+
+def test_repeated_status_changes_are_idempotent(data_path: Path) -> None:
+    seed(data_path, make_todo())
+    client = make_client(data_path)
+
+    first = post_action(client, f"/todos/{FIRST_ID}/complete")
+    second = post_action(client, f"/todos/{FIRST_ID}/complete")
+
+    assert first.status_code == second.status_code == 303
+    assert stored(data_path) == [make_todo(is_completed=True)]
+
+    post_action(client, f"/todos/{FIRST_ID}/incomplete")
+    post_action(client, f"/todos/{FIRST_ID}/incomplete")
+
+    assert stored(data_path) == [make_todo()]
+
+
+def test_status_and_delete_leave_the_other_todos_unchanged(data_path: Path) -> None:
+    first = make_todo(FIRST_ID, title="Target")
+    second = make_todo(SECOND_ID, title="Other", created_at=LATER_TIME, is_completed=True)
+    seed(data_path, first, second)
+    client = make_client(data_path)
+
+    post_action(client, f"/todos/{FIRST_ID}/complete")
+    assert stored(data_path) == [first.model_copy(update={"is_completed": True}), second]
+
+    deleted = post_action(client, f"/todos/{FIRST_ID}/delete")
+    assert deleted.headers["location"] == "/"
+    assert stored(data_path) == [second]
+
+
+# WEB-012: Update ignores system-managed fields
+
+
+def test_update_ignores_submitted_system_managed_fields(data_path: Path) -> None:
+    original = make_todo(description="Keep", due_date=date(2026, 9, 30), is_completed=True)
+    seed(data_path, original)
+
+    response = post_action(
+        make_client(data_path),
+        f"/todos/{FIRST_ID}/edit",
+        title="Renamed",
+        description="Keep",
+        dueDate="2026-09-30",
+        id=str(THIRD_ID),
+        isCompleted="false",
+        is_completed="false",
+        createdAt="2000-01-01T00:00:00Z",
+        created_at="2000-01-01T00:00:00Z",
+    )
+
+    assert response.status_code == 303
+    assert stored(data_path) == [original.model_copy(update={"title": "Renamed"})]
+
+
+# WEB-013: mutations require POST and work without JavaScript
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/todos/{FIRST_ID}/edit",
+        f"/todos/{FIRST_ID}/complete",
+        f"/todos/{FIRST_ID}/incomplete",
+        f"/todos/{FIRST_ID}/delete",
+    ],
+)
+def test_get_does_not_mutate_a_todo(data_path: Path, path: str) -> None:
+    seed(data_path, make_todo(description="Stay", due_date=date(2026, 9, 30)))
+    before = data_path.read_bytes()
+
+    make_client(data_path).get(path)
+
+    assert data_path.read_bytes() == before
+
+
+def test_mutation_forms_post_and_pages_need_no_javascript(data_path: Path) -> None:
+    seed(data_path, make_todo())
+    client = make_client(data_path)
+
+    for html in (
+        client.get(f"/todos/{FIRST_ID}").text,
+        client.get(f"/todos/{FIRST_ID}/edit").text,
+    ):
+        assert "<script" not in html
+        assert 'method="get"' not in html.lower()
+    detail = client.get(f"/todos/{FIRST_ID}").text
+    assert 'method="post"' in detail
+    assert f'action="/todos/{FIRST_ID}/complete"' in detail
+    assert f'action="/todos/{FIRST_ID}/delete"' in detail
+
+
+# WEB-014: updates, status, and deletes survive a new application instance
+
+
+def test_updates_and_status_remain_after_restart_and_deletes_stay_absent(
+    data_path: Path,
+) -> None:
+    seed(data_path, make_todo(description="Original", due_date=date(2026, 9, 30)))
+    first_run = make_client(data_path)
+    post_action(
+        first_run,
+        f"/todos/{FIRST_ID}/edit",
+        title="After restart",
+        description="",
+        dueDate="",
+    )
+    post_action(first_run, f"/todos/{FIRST_ID}/complete")
+
+    second_run = make_client(data_path, times=(LATEST_TIME,), ids=(THIRD_ID,))
+    detail = second_run.get(f"/todos/{FIRST_ID}").text
+    assert "After restart" in detail
+    assert "<dd>No description</dd>" in detail
+    assert "<dd>No due date</dd>" in detail
+    assert "<dd>Completed</dd>" in detail
+    assert '<time datetime="2026-09-25T14:30:00Z">' in detail
+
+    post_action(second_run, f"/todos/{FIRST_ID}/delete")
+    third_run = make_client(data_path, times=(LATEST_TIME,), ids=(THIRD_ID,))
+    assert "After restart" not in third_run.get("/").text
+    assert stored(data_path) == []
+
+
+# WEB-016: strikethrough follows Complete and Incomplete
+
+
+def test_list_strikethrough_follows_complete_and_incomplete(data_path: Path) -> None:
+    seed(data_path, make_todo(title="Toggle me"))
+    client = make_client(data_path)
+
+    assert "<s>Toggle me</s>" not in client.get("/").text
+
+    post_action(client, f"/todos/{FIRST_ID}/complete")
+    assert "<s>Toggle me</s>" in client.get("/").text
+    assert "Mark as not completed" in client.get(f"/todos/{FIRST_ID}").text
+
+    post_action(client, f"/todos/{FIRST_ID}/incomplete")
+    assert "<s>Toggle me</s>" not in client.get("/").text
+    assert ">Toggle me</a>" in client.get("/").text
