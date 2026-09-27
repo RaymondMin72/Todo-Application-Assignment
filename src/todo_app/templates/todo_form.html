@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% macro error_attributes(errors, name) -%}
+  {%- if errors.get(name) %} aria-invalid="true" aria-describedby="{{ name }}-error"{% endif -%}
+{%- endmacro %}
+{% macro error_message(errors, name) -%}
+  {%- if errors.get(name) %}<small id="{{ name }}-error" class="field-error">{{ errors[name] | join(" ") }}</small>{% endif -%}
+{%- endmacro %}
+{% block title %}{{ heading }}{% endblock %}
+{% block content %}
+<h1>{{ heading }}</h1>
+<form method="post" action="{{ action }}">
+  <label for="title">Title</label>
+  <input type="text" id="title" name="title" value="{{ form.title }}"{{ error_attributes(errors, "title") }}>
+  {{ error_message(errors, "title") }}
+
+  <label for="description">Description (optional)</label>
+  {#- Browsers drop one newline right after <textarea>, so emit one to keep the raw value intact. #}
+  <textarea id="description" name="description" rows="5"{{ error_attributes(errors, "description") }}>
+{{ form.description }}</textarea>
+  {{ error_message(errors, "description") }}
+
+  <label for="dueDate">Due date (optional, YYYY-MM-DD)</label>
+  <input type="text" id="dueDate" name="dueDate" value="{{ form.dueDate }}"{{ error_attributes(errors, "dueDate") }}>
+  {{ error_message(errors, "dueDate") }}
+
+  <button type="submit">{{ submit_label }}</button>
+</form>
+<p><a href="/">Back to all todos</a></p>
+{% endblock %}

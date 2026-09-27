@@ -1,0 +1,8 @@
+/* Show stored description line breaks without rendering the text as HTML. */
+.todo-description {
+  white-space: pre-wrap;
+}
+
+.field-error {
+  color: var(--pico-del-color);
+}

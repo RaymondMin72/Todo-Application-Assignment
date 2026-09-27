@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ todo.title }}{% endblock %}
+{% block content %}
+<article>
+  <h1>{{ todo.title }}</h1>
+  <dl class="todo-fields">
+    <dt>ID</dt>
+    <dd><code>{{ todo.id }}</code></dd>
+    <dt>Title</dt>
+    <dd>{{ todo.title }}</dd>
+    <dt>Description</dt>
+    {% if todo.description is not none %}
+    <dd class="todo-description">{{ todo.description }}</dd>
+    {% else %}
+    <dd>No description</dd>
+    {% endif %}
+    <dt>Due date</dt>
+    <dd>{{ todo.due_date.isoformat() if todo.due_date is not none else "No due date" }}</dd>
+    <dt>Status</dt>
+    <dd>{{ "Completed" if todo.is_completed else "Not completed" }}</dd>
+    <dt>Created</dt>
+    <dd><time datetime="{{ todo.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ todo.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time></dd>
+  </dl>
+</article>
+<p><a href="/">Back to all todos</a></p>
+{% endblock %}

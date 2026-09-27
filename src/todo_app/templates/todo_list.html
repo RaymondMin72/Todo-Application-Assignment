@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Todos{% endblock %}
+{% block content %}
+<h1>Todos</h1>
+{% if todos %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Title</th>
+      <th scope="col">Due date</th>
+      <th scope="col">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for todo in todos %}
+    <tr>
+      <td><a href="/todos/{{ todo.id }}">{% if todo.is_completed %}<s>{{ todo.title }}</s>{% else %}{{ todo.title }}{% endif %}</a></td>
+      <td>{{ todo.due_date.isoformat() if todo.due_date is not none else "No due date" }}</td>
+      <td>{{ "Completed" if todo.is_completed else "Not completed" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>You have no todos yet. <a href="/todos/new">Create your first todo</a>.</p>
+{% endif %}
+{% endblock %}
