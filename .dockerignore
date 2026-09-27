@@ -20,3 +20,4 @@ data/
 .env
 .env.*
 docs/
+tests/
