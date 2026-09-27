@@ -277,6 +277,23 @@ def test_malformed_json_or_wrong_root_is_rejected_unchanged(
     assert data_path.read_bytes() == original
 
 
+def test_duplicate_json_object_key_is_rejected_unchanged(
+    repository: JsonTodoRepository, data_path: Path
+) -> None:
+    original = write_text(
+        data_path,
+        '[{"id":"11111111-1111-4111-8111-111111111111",'
+        '"id":"22222222-2222-4222-8222-222222222222",'
+        '"title":"Task","description":null,"dueDate":null,'
+        '"isCompleted":false,"createdAt":"2026-09-25T14:30:00Z"}]',
+    )
+
+    with pytest.raises(PersistenceReadError, match="duplicate key"):
+        repository.load_all()
+
+    assert data_path.read_bytes() == original
+
+
 def test_invalid_utf8_is_rejected_unchanged(
     repository: JsonTodoRepository, data_path: Path
 ) -> None:

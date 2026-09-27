@@ -65,8 +65,8 @@ class JsonTodoRepository:
         if not text.strip():
             raise PersistenceReadError(f"{self._path} exists but contains no data")
         try:
-            document = json.loads(text)
-        except json.JSONDecodeError as exc:
+            document = json.loads(text, object_pairs_hook=_object_without_duplicate_keys)
+        except ValueError as exc:
             raise PersistenceReadError(f"{self._path} is not valid JSON: {exc}") from exc
         if not isinstance(document, list):
             raise PersistenceReadError(f"{self._path} must contain a JSON array at the top level")
@@ -119,6 +119,17 @@ def _discard(temp_path: Path) -> None:
     # temporary file is harmless because load_all() reads only the primary path.
     with contextlib.suppress(OSError):
         os.unlink(temp_path)
+
+
+def _object_without_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    # json.loads collapses repeated keys before a dict exists. Reject them here so a hand-edited
+    # file cannot silently keep only the last value.
+    record: dict[str, object] = {}
+    for key, value in pairs:
+        if key in record:
+            raise ValueError(f"duplicate key {key!r}")
+        record[key] = value
+    return record
 
 
 def _decode_record(item: object) -> Todo:
