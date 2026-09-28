@@ -177,6 +177,11 @@ def _decode_optional_date(value: object) -> date | None:
     return parsed
 
 
+def _format_timestamp(value: datetime) -> str:
+    # strftime("%Y") does not zero-pad years before 1000 on glibc.
+    return value.isoformat(timespec="seconds") + "Z"
+
+
 def _decode_timestamp(value: object) -> datetime:
     if not isinstance(value, str):
         raise ValueError("createdAt must be a string")
@@ -185,7 +190,7 @@ def _decode_timestamp(value: object) -> datetime:
     except ValueError:
         raise ValueError(f"createdAt {value!r} is not a YYYY-MM-DDTHH:MM:SSZ timestamp") from None
     # strptime() tolerates unpadded fields; only the exact canonical text is valid.
-    if parsed.strftime(_TIMESTAMP_FORMAT) != value:
+    if _format_timestamp(parsed) != value:
         raise ValueError(f"createdAt {value!r} is not in canonical YYYY-MM-DDTHH:MM:SSZ form")
     return parsed.replace(tzinfo=UTC)
 
@@ -217,5 +222,5 @@ def _encode_record(todo: Todo) -> dict[str, object]:
         "description": todo.description,
         "dueDate": None if todo.due_date is None else todo.due_date.isoformat(),
         "isCompleted": todo.is_completed,
-        "createdAt": todo.created_at.astimezone(UTC).strftime(_TIMESTAMP_FORMAT),
+        "createdAt": _format_timestamp(todo.created_at.astimezone(UTC).replace(tzinfo=None)),
     }
