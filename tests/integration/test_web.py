@@ -353,6 +353,14 @@ def test_detail_shows_all_six_fields(data_path: Path) -> None:
     assert '<time datetime="2026-09-25T14:30:00Z">2026-09-25 14:30:00 UTC</time>' in html
 
 
+def test_detail_shows_early_year_creation_time_with_four_digits(data_path: Path) -> None:
+    seed(data_path, make_todo(created_at=datetime(1, 1, 1, tzinfo=UTC)))
+
+    html = make_client(data_path).get(f"/todos/{FIRST_ID}").text
+
+    assert '<time datetime="0001-01-01T00:00:00Z">0001-01-01 00:00:00 UTC</time>' in html
+
+
 def test_detail_shows_placeholders_for_absent_optional_values(data_path: Path) -> None:
     seed(data_path, make_todo(description=None, due_date=None))
 

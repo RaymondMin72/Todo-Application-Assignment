@@ -17,7 +17,9 @@
     <dt>Status</dt>
     <dd>{{ "Completed" if todo.is_completed else "Not completed" }}</dd>
     <dt>Created</dt>
-    <dd><time datetime="{{ todo.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ todo.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</time></dd>
+    {#- strftime("%Y") does not zero-pad years before 1000 on glibc; created_at is always UTC. #}
+    {%- set created_utc = todo.created_at.replace(tzinfo=none) %}
+    <dd><time datetime="{{ created_utc.isoformat(timespec='seconds') }}Z">{{ created_utc.isoformat(sep=' ', timespec='seconds') }} UTC</time></dd>
   </dl>
 </article>
 <div class="detail-actions">
